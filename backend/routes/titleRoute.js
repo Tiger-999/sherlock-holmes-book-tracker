@@ -48,8 +48,16 @@ router.post("/", authenticateToken, async (req, res) => {
             return res.status(400).json({error: "This title already exists in your list."});
         }
 
-        const result = await pool.query("INSERT INTO user_books (title, read, user_id, rating) VALUES ($1, $2, $3, $4) RETURNING *",
-            [title, read, userId, rating]);
+        const typeResult = await pool.query("SELECT type from books WHERE title = $1", [title]);
+
+        if (typeResult.rows.length === 0) {
+            return res.status(400).json({error: "Title not found in the master table."});
+        }
+
+        const type = typeResult.rows[0].type;
+
+        const result = await pool.query("INSERT INTO user_books (title, read, user_id, rating, type) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+            [title, read, userId, rating, type]);
         res.status(201).json(result.rows[0]);
 
     } catch (err) {
@@ -100,8 +108,16 @@ router.put("/:id", authenticateToken, async (req, res) => {
             return res.status(400).json({error: "This title already exists in your list."});
         }
 
-        const result = await pool.query("UPDATE user_books SET title = $1, read = $2, rating = $3 WHERE user_id = $4 AND id = $5 RETURNING *",
-            [title, read, rating, userId, titleId]);
+        const typeResult = await pool.query("SELECT type from books WHERE title = $1", [title]);
+
+        if (typeResult.rows.length === 0) {
+            return res.status(400).json({error: "Title not found in the master table."});
+        }
+
+        const type = typeResult.rows[0].type;
+
+        const result = await pool.query("UPDATE user_books SET title = $1, read = $2, rating = $3, updated_at = CURRENT_TIMESTAMP, type = $4 WHERE user_id = $5 AND id = $6 RETURNING *",
+            [title, read, rating, type, userId, titleId]);
         
         if (result.rows.length === 0) {
             return res.status(404).json({error: "Title not found."});
@@ -126,6 +142,7 @@ router.patch("/:id", authenticateToken, async (req, res) => {
         const updateParameter = [];
         
         let paramIndex = 1;
+        let type = null;
 
         for (let key of allowedField) {
 
@@ -141,6 +158,14 @@ router.patch("/:id", authenticateToken, async (req, res) => {
                     if (checkDuplicate.rows.length > 0) {
                         return res.status(400).json({error: "This title already exists in your list."});
                     }
+
+                    const typeResult = await pool.query("SELECT type FROM books WHERE title = $1", fields["title"].trim());
+
+                    if (typeResult.rows.length === 0) {
+                        return res.status(400).json({error: "Title not found in the master table."});
+                    }
+
+                    type = typeResult.rows[0].type;
 
                     fields[key] = fields[key].trim();
                 }
@@ -165,6 +190,14 @@ router.patch("/:id", authenticateToken, async (req, res) => {
 
         if (updateQuery.length === 0) {
             return res.status(400).json({error: "No fields to update."});
+        }
+
+        updateQuery.push("updated_at = CURRENT_TIMESTAMP");
+
+        if (type !== null) {
+            updateQuery.push(`type = $${paramIndex}`);
+            updateParameter.push(type);
+            paramIndex++;
         }
 
         updateParameter.push(userId);
